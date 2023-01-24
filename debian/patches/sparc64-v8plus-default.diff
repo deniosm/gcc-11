@@ -1,0 +1,28 @@
+From 23987912ddb4207de0714d81237f93f613557d1f Mon Sep 17 00:00:00 2001
+From: Eric Botcazou <ebotcazou@adacore.com>
+Date: Mon, 31 Jan 2022 09:21:48 +0100
+Subject: [PATCH] Use V8+ default in 32-bit mode on SPARC64/Linux
+
+This is what has been done for ages on SPARC/Solaris and makes it possible
+to use 64-bit atomic instructions even in 32-bit mode.
+
+gcc/
+	PR target/104189
+	* config/sparc/linux64.h (TARGET_DEFAULT): Add MASK_V8PLUS.
+
+--- a/src/gcc/config/sparc/linux64.h
++++ b/src/gcc/config/sparc/linux64.h
+@@ -35,8 +35,8 @@ along with GCC; see the file COPYING3.  If not see
+ #if defined(TARGET_64BIT_DEFAULT) && TARGET_CPU_DEFAULT >= TARGET_CPU_v9
+ #undef TARGET_DEFAULT
+ #define TARGET_DEFAULT \
+-  (MASK_V9 + MASK_PTR64 + MASK_64BIT + MASK_STACK_BIAS + \
+-   MASK_APP_REGS + MASK_FPU + MASK_LONG_DOUBLE_128)
++  (MASK_V9 + MASK_64BIT + MASK_PTR64 + MASK_STACK_BIAS + \
++   MASK_V8PLUS + MASK_APP_REGS + MASK_FPU + MASK_LONG_DOUBLE_128)
+ #endif
+ 
+ /* This must be v9a not just v9 because by default we enable
+-- 
+2.31.1
+

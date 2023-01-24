@@ -1,0 +1,898 @@
+# DP: Revert: IBM Z: Use @PLT symbols for local functions in 64-bit mode
+
+From 2335aa8771acd06b082d3e15d9f21ae0a802afd7 Mon Sep 17 00:00:00 2001
+From: Ilya Leoshkevich <iii@linux.ibm.com>
+Date: Mon, 7 Jun 2021 13:44:15 +0200
+Subject: [PATCH] IBM Z: Use @PLT symbols for local functions in 64-bit mode
+
+This helps with generating code for kernel hotpatches, which contain
+individual functions and are loaded more than 2G away from vmlinux.
+This should not create performance regressions for the normal use
+cases, because for local functions ld replaces @PLT calls with direct
+calls.
+
+gcc/ChangeLog:
+
+	* config/s390/predicates.md (bras_sym_operand): Accept all
+	functions in 64-bit mode, use UNSPEC_PLT31.
+	(larl_operand): Use UNSPEC_PLT31.
+	* config/s390/s390.c (s390_loadrelative_operand_p): Likewise.
+	(legitimize_pic_address): Likewise.
+	(s390_emit_tls_call_insn): Mark __tls_get_offset as function,
+	use UNSPEC_PLT31.
+	(s390_delegitimize_address): Use UNSPEC_PLT31.
+	(s390_output_addr_const_extra): Likewise.
+	(print_operand): Add @PLT to TLS calls, handle %K.
+	(s390_function_profiler): Mark __fentry__/_mcount as function,
+	use %K, use UNSPEC_PLT31.
+	(s390_output_mi_thunk): Use only UNSPEC_GOT, use %K.
+	(s390_emit_call): Use UNSPEC_PLT31.
+	(s390_emit_tpf_eh_return): Mark __tpf_eh_return as function.
+	* config/s390/s390.md (UNSPEC_PLT31): Rename from UNSPEC_PLT.
+	(*movdi_64): Use %K.
+	(reload_base_64): Likewise.
+	(*sibcall_brc): Likewise.
+	(*sibcall_brcl): Likewise.
+	(*sibcall_value_brc): Likewise.
+	(*sibcall_value_brcl): Likewise.
+	(*bras): Likewise.
+	(*brasl): Likewise.
+	(*bras_r): Likewise.
+	(*brasl_r): Likewise.
+	(*bras_tls): Likewise.
+	(*brasl_tls): Likewise.
+	(main_base_64): Likewise.
+	(reload_base_64): Likewise.
+	(@split_stack_call<mode>): Likewise.
+
+gcc/testsuite/ChangeLog:
+
+	* g++.dg/ext/visibility/noPLT.C: Skip on s390x.
+	* g++.target/s390/mi-thunk.C: New test.
+	* gcc.target/s390/nodatarel-1.c: Move foostatic to the new
+	tests.
+	* gcc.target/s390/pr80080-4.c: Allow @PLT suffix.
+	* gcc.target/s390/risbg-ll-3.c: Likewise.
+	* gcc.target/s390/call.h: Common code for the new tests.
+	* gcc.target/s390/call-z10-pic-nodatarel.c: New test.
+	* gcc.target/s390/call-z10-pic.c: New test.
+	* gcc.target/s390/call-z10.c: New test.
+	* gcc.target/s390/call-z9-pic-nodatarel.c: New test.
+	* gcc.target/s390/call-z9-pic.c: New test.
+	* gcc.target/s390/call-z9.c: New test.
+	* gcc.target/s390/mfentry-m64-pic.c: New test.
+	* gcc.target/s390/tls.h: Common code for the new TLS tests.
+	* gcc.target/s390/tls-pic.c: New test.
+	* gcc.target/s390/tls.c: New test.
+
+(cherry picked from commit 0990d93dd8a)
+---
+ gcc/config/s390/predicates.md                 |  9 ++-
+ gcc/config/s390/s390.c                        | 81 +++++++++++++------
+ gcc/config/s390/s390.md                       | 32 ++++----
+ gcc/testsuite/g++.dg/ext/visibility/noPLT.C   |  2 +-
+ gcc/testsuite/g++.target/s390/mi-thunk.C      | 23 ++++++
+ .../gcc.target/s390/call-z10-pic-nodatarel.c  | 20 +++++
+ gcc/testsuite/gcc.target/s390/call-z10-pic.c  | 20 +++++
+ gcc/testsuite/gcc.target/s390/call-z10.c      | 20 +++++
+ .../gcc.target/s390/call-z9-pic-nodatarel.c   | 18 +++++
+ gcc/testsuite/gcc.target/s390/call-z9-pic.c   | 18 +++++
+ gcc/testsuite/gcc.target/s390/call-z9.c       | 20 +++++
+ gcc/testsuite/gcc.target/s390/call.h          | 40 +++++++++
+ .../gcc.target/s390/mfentry-m64-pic.c         |  9 +++
+ gcc/testsuite/gcc.target/s390/nodatarel-1.c   | 26 +-----
+ gcc/testsuite/gcc.target/s390/pr80080-4.c     |  2 +-
+ gcc/testsuite/gcc.target/s390/risbg-ll-3.c    |  6 +-
+ gcc/testsuite/gcc.target/s390/tls-pic.c       | 14 ++++
+ gcc/testsuite/gcc.target/s390/tls.c           | 10 +++
+ gcc/testsuite/gcc.target/s390/tls.h           | 23 ++++++
+ 19 files changed, 320 insertions(+), 73 deletions(-)
+ create mode 100644 gcc/testsuite/g++.target/s390/mi-thunk.C
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z10-pic-nodatarel.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z10-pic.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z10.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z9-pic-nodatarel.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z9-pic.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call-z9.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/call.h
+ create mode 100644 gcc/testsuite/gcc.target/s390/mfentry-m64-pic.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/tls-pic.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/tls.c
+ create mode 100644 gcc/testsuite/gcc.target/s390/tls.h
+
+Index: gcc-11-11.2.0/src/gcc/config/s390/predicates.md
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/config/s390/predicates.md
++++ gcc-11-11.2.0/src/gcc/config/s390/predicates.md
+@@ -101,13 +101,10 @@
+ 
+ (define_special_predicate "bras_sym_operand"
+   (ior (and (match_code "symbol_ref")
+-	    (ior (match_test "!flag_pic")
+-		 (match_test "SYMBOL_REF_LOCAL_P (op)")
+-		 (and (match_test "TARGET_64BIT")
+-		      (match_test "SYMBOL_REF_FUNCTION_P (op)"))))
++	    (match_test "!flag_pic || SYMBOL_REF_LOCAL_P (op)"))
+        (and (match_code "const")
+ 	    (and (match_test "GET_CODE (XEXP (op, 0)) == UNSPEC")
+-		 (match_test "XINT (XEXP (op, 0), 1) == UNSPEC_PLT31")))))
++		 (match_test "XINT (XEXP (op, 0), 1) == UNSPEC_PLT")))))
+ 
+ ;; Return true if OP is a PLUS that is not a legitimate
+ ;; operand for the LA instruction.
+@@ -200,7 +197,7 @@
+       && XINT (op, 1) == UNSPEC_GOTENT)
+     return true;
+   if (GET_CODE (op) == UNSPEC
+-      && XINT (op, 1) == UNSPEC_PLT31)
++      && XINT (op, 1) == UNSPEC_PLT)
+     return true;
+   if (GET_CODE (op) == UNSPEC
+       && XINT (op, 1) == UNSPEC_INDNTPOFF)
+Index: gcc-11-11.2.0/src/gcc/config/s390/s390.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/config/s390/s390.c
++++ gcc-11-11.2.0/src/gcc/config/s390/s390.c
+@@ -3291,7 +3291,7 @@ s390_loadrelative_operand_p (rtx addr, r
+   if (GET_CODE (addr) == SYMBOL_REF
+       || (GET_CODE (addr) == UNSPEC
+ 	  && (XINT (addr, 1) == UNSPEC_GOTENT
+-	      || XINT (addr, 1) == UNSPEC_PLT31)))
++	      || XINT (addr, 1) == UNSPEC_PLT)))
+     {
+       if (symref)
+ 	*symref = addr;
+@@ -4964,7 +4964,7 @@ legitimize_pic_address (rtx orig, rtx re
+        || (SYMBOL_REF_P (addr) && s390_rel_address_ok_p (addr))
+        || (GET_CODE (addr) == UNSPEC &&
+ 	   (XINT (addr, 1) == UNSPEC_GOTENT
+-	    || XINT (addr, 1) == UNSPEC_PLT31)))
++	    || XINT (addr, 1) == UNSPEC_PLT)))
+       && GET_CODE (addend) == CONST_INT)
+     {
+       /* This can be locally addressed.  */
+@@ -5125,7 +5125,7 @@ legitimize_pic_address (rtx orig, rtx re
+ 
+ 	  /* For @PLT larl is used.  This is handled like local
+ 	     symbol refs.  */
+-	case UNSPEC_PLT31:
++	case UNSPEC_PLT:
+ 	  gcc_unreachable ();
+ 	  break;
+ 
+@@ -5191,10 +5191,7 @@ s390_emit_tls_call_insn (rtx result_reg,
+     emit_insn (s390_load_got ());
+ 
+   if (!s390_tls_symbol)
+-    {
+-      s390_tls_symbol = gen_rtx_SYMBOL_REF (Pmode, "__tls_get_offset");
+-      SYMBOL_REF_FLAGS (s390_tls_symbol) |= SYMBOL_FLAG_FUNCTION;
+-    }
++    s390_tls_symbol = gen_rtx_SYMBOL_REF (Pmode, "__tls_get_offset");
+ 
+   insn = s390_emit_call (s390_tls_symbol, tls_call, result_reg,
+ 			 gen_rtx_REG (Pmode, RETURN_REGNUM));
+@@ -7609,7 +7606,7 @@ s390_delegitimize_address (rtx orig_x)
+       y = XEXP (x, 0);
+       if (GET_CODE (y) == UNSPEC
+ 	  && (XINT (y, 1) == UNSPEC_GOTENT
+-	      || XINT (y, 1) == UNSPEC_PLT31))
++	      || XINT (y, 1) == UNSPEC_PLT))
+ 	y = XVECEXP (y, 0, 0);
+       else
+ 	return orig_x;
+@@ -7862,7 +7859,7 @@ s390_output_addr_const_extra (FILE *file
+ 	output_addr_const (file, XVECEXP (x, 0, 0));
+ 	fprintf (file, "@GOTOFF");
+ 	return true;
+-      case UNSPEC_PLT31:
++      case UNSPEC_PLT:
+ 	output_addr_const (file, XVECEXP (x, 0, 0));
+ 	fprintf (file, "@PLT");
+ 	return true;
+@@ -7956,7 +7953,6 @@ print_operand_address (FILE *file, rtx a
+     'E': print opcode suffix for branch on index instruction.
+     'G': print the size of the operand in bytes.
+     'J': print tls_load/tls_gdcall/tls_ldcall suffix
+-    'K': print @PLT suffix for call targets and load address values.
+     'M': print the second word of a TImode operand.
+     'N': print the second word of a DImode operand.
+     'O': print only the displacement of a memory reference or address.
+@@ -8143,29 +8139,6 @@ print_operand (FILE *file, rtx x, int co
+     case 'Y':
+       print_shift_count_operand (file, x);
+       return;
+-
+-    case 'K':
+-      /* Append @PLT to both local and non-local symbols in order to support
+-	 Linux Kernel livepatching: patches contain individual functions and
+-	 are loaded further than 2G away from vmlinux, and therefore they must
+-	 call even static functions via PLT.  ld will optimize @PLT away for
+-	 normal code, and keep it for patches.
+-
+-	 Do not indiscriminately add @PLT in 31-bit mode due to the %r12
+-	 restriction, use UNSPEC_PLT31 instead.
+-
+-	 @PLT only makes sense for functions, data is taken care of by
+-	 -mno-pic-data-is-text-relative.
+-
+-	 Adding @PLT interferes with handling of weak symbols in non-PIC code,
+-	 since their addresses are loaded with larl, which then always produces
+-	 a non-NULL result, so skip them here as well.  */
+-      if (TARGET_64BIT
+-	  && GET_CODE (x) == SYMBOL_REF
+-	  && SYMBOL_REF_FUNCTION_P (x)
+-	  && !(SYMBOL_REF_WEAK (x) && !flag_pic))
+-	fprintf (file, "@PLT");
+-      return;
+     }
+ 
+   switch (GET_CODE (x))
+@@ -13162,10 +13135,9 @@ s390_function_profiler (FILE *file, int
+   op[3] = GEN_INT (UNITS_PER_LONG);
+ 
+   op[2] = gen_rtx_SYMBOL_REF (Pmode, flag_fentry ? "__fentry__" : "_mcount");
+-  SYMBOL_REF_FLAGS (op[2]) |= SYMBOL_FLAG_FUNCTION;
+-  if (flag_pic && !TARGET_64BIT)
++  if (flag_pic)
+     {
+-      op[2] = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, op[2]), UNSPEC_PLT31);
++      op[2] = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, op[2]), UNSPEC_PLT);
+       op[2] = gen_rtx_CONST (Pmode, op[2]);
+     }
+ 
+@@ -13180,7 +13152,7 @@ s390_function_profiler (FILE *file, int
+ 	warning (OPT_Wcannot_profile, "nested functions cannot be profiled "
+ 		 "with %<-mfentry%> on s390");
+       else
+-	output_asm_insn ("brasl\t0,%2%K2", op);
++	output_asm_insn ("brasl\t0,%2", op);
+     }
+   else if (TARGET_64BIT)
+     {
+@@ -13192,7 +13164,7 @@ s390_function_profiler (FILE *file, int
+ 	  output_asm_insn ("stg\t%0,%1", op);
+ 	  if (flag_dwarf2_cfi_asm)
+ 	    output_asm_insn (".cfi_rel_offset\t%0,%3", op);
+-	  output_asm_insn ("brasl\t%0,%2%K2", op);
++	  output_asm_insn ("brasl\t%0,%2", op);
+ 	  output_asm_insn ("lg\t%0,%1", op);
+ 	  if (flag_dwarf2_cfi_asm)
+ 	    output_asm_insn (".cfi_restore\t%0", op);
+@@ -13208,7 +13180,7 @@ s390_function_profiler (FILE *file, int
+ 	  output_asm_insn ("st\t%0,%1", op);
+ 	  if (flag_dwarf2_cfi_asm)
+ 	    output_asm_insn (".cfi_rel_offset\t%0,%3", op);
+-	  output_asm_insn ("brasl\t%0,%2%K2", op);
++	  output_asm_insn ("brasl\t%0,%2", op);
+ 	  output_asm_insn ("l\t%0,%1", op);
+ 	  if (flag_dwarf2_cfi_asm)
+ 	    output_asm_insn (".cfi_restore\t%0", op);
+@@ -13284,11 +13256,9 @@ s390_output_mi_thunk (FILE *file, tree t
+   if (flag_pic && !SYMBOL_REF_LOCAL_P (op[0]))
+     {
+       nonlocal = 1;
+-      if (!TARGET_64BIT)
+-	{
+-	  op[0] = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, op[0]), UNSPEC_GOT);
+-	  op[0] = gen_rtx_CONST (Pmode, op[0]);
+-	}
++      op[0] = gen_rtx_UNSPEC (Pmode, gen_rtvec (1, op[0]),
++			      TARGET_64BIT ? UNSPEC_PLT : UNSPEC_GOT);
++      op[0] = gen_rtx_CONST (Pmode, op[0]);
+     }
+ 
+   /* Operand 1 is the 'this' pointer.  */
+@@ -13378,7 +13348,7 @@ s390_output_mi_thunk (FILE *file, tree t
+ 	}
+ 
+       /* Jump to target.  */
+-      output_asm_insn ("jg\t%0%K0", op);
++      output_asm_insn ("jg\t%0", op);
+ 
+       /* Output literal pool if required.  */
+       if (op[5])
+@@ -13769,7 +13739,7 @@ rtx_insn *
+ s390_emit_call (rtx addr_location, rtx tls_call, rtx result_reg,
+ 		rtx retaddr_reg)
+ {
+-  bool plt31_call_p = false;
++  bool plt_call = false;
+   rtx_insn *insn;
+   rtx vec[4] = { NULL_RTX };
+   int elts = 0;
+@@ -13784,15 +13754,15 @@ s390_emit_call (rtx addr_location, rtx t
+     {
+       /* When calling a global routine in PIC mode, we must
+ 	 replace the symbol itself with the PLT stub.  */
+-      if (flag_pic && !SYMBOL_REF_LOCAL_P (addr_location) && !TARGET_64BIT)
++      if (flag_pic && !SYMBOL_REF_LOCAL_P (addr_location))
+ 	{
+-	  if (retaddr_reg != NULL_RTX)
++	  if (TARGET_64BIT || retaddr_reg != NULL_RTX)
+ 	    {
+ 	      addr_location = gen_rtx_UNSPEC (Pmode,
+ 					      gen_rtvec (1, addr_location),
+-					      UNSPEC_PLT31);
++					      UNSPEC_PLT);
+ 	      addr_location = gen_rtx_CONST (Pmode, addr_location);
+-	      plt31_call_p = true;
++	      plt_call = true;
+ 	    }
+ 	  else
+ 	    /* For -fpic code the PLT entries might use r12 which is
+@@ -13813,7 +13783,7 @@ s390_emit_call (rtx addr_location, rtx t
+      register 1.  */
+   if (retaddr_reg == NULL_RTX
+       && GET_CODE (addr_location) != SYMBOL_REF
+-      && !plt31_call_p)
++      && !plt_call)
+     {
+       emit_move_insn (gen_rtx_REG (Pmode, SIBCALL_REGNUM), addr_location);
+       addr_location = gen_rtx_REG (Pmode, SIBCALL_REGNUM);
+@@ -13821,7 +13791,7 @@ s390_emit_call (rtx addr_location, rtx t
+ 
+   if (TARGET_INDIRECT_BRANCH_NOBP_CALL
+       && GET_CODE (addr_location) != SYMBOL_REF
+-      && !plt31_call_p)
++      && !plt_call)
+     {
+       /* Indirect branch thunks require the target to be a single GPR.  */
+       addr_location = force_reg (Pmode, addr_location);
+@@ -13873,7 +13843,7 @@ s390_emit_call (rtx addr_location, rtx t
+   insn = emit_call_insn (*call);
+ 
+   /* 31-bit PLT stubs and tls calls use the GOT register implicitly.  */
+-  if (plt31_call_p || tls_call != NULL_RTX)
++  if ((!TARGET_64BIT && plt_call) || tls_call != NULL_RTX)
+     {
+       /* s390_function_ok_for_sibcall should
+ 	 have denied sibcalls in this case.  */
+@@ -13929,10 +13899,7 @@ s390_emit_tpf_eh_return (rtx target)
+   rtx reg, orig_ra;
+ 
+   if (!s390_tpf_eh_return_symbol)
+-    {
+-      s390_tpf_eh_return_symbol = gen_rtx_SYMBOL_REF (Pmode, "__tpf_eh_return");
+-      SYMBOL_REF_FLAGS (s390_tpf_eh_return_symbol) |= SYMBOL_FLAG_FUNCTION;
+-    }
++    s390_tpf_eh_return_symbol = gen_rtx_SYMBOL_REF (Pmode, "__tpf_eh_return");
+ 
+   reg = gen_rtx_REG (Pmode, 2);
+   orig_ra = gen_rtx_REG (Pmode, 3);
+Index: gcc-11-11.2.0/src/gcc/config/s390/s390.md
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/config/s390/s390.md
++++ gcc-11-11.2.0/src/gcc/config/s390/s390.md
+@@ -79,7 +79,7 @@
+    UNSPEC_GOTENT
+    UNSPEC_GOT
+    UNSPEC_GOTOFF
+-   UNSPEC_PLT31
++   UNSPEC_PLT
+    UNSPEC_PLTOFF
+ 
+    ; Literal pool
+@@ -1906,7 +1906,7 @@
+    vlgvg\t%0,%v1,0
+    vleg\t%v0,%1,0
+    vsteg\t%v1,%0,0
+-   larl\t%0,%1%K1"
++   larl\t%0,%1"
+   [(set_attr "op_type" "RI,RI,RI,RI,RI,RIL,RIL,RIL,RRE,RRE,RRE,RXY,RIL,RRE,RXY,
+                         RXY,RR,RX,RXY,RX,RXY,RIL,SIL,*,*,RS,RS,VRI,VRR,VRS,VRS,
+                         VRX,VRX,RIL")
+@@ -2180,7 +2180,7 @@
+         (match_operand:SI 1 "larl_operand" "X"))]
+   "!TARGET_64BIT
+    && !FP_REG_P (operands[0])"
+-  "larl\t%0,%1%K1"
++  "larl\t%0,%1"
+    [(set_attr "op_type" "RIL")
+     (set_attr "type"    "larl")
+     (set_attr "z10prop" "z10_fwd_A1")
+@@ -10379,7 +10379,7 @@
+   [(call (mem:QI (match_operand 0 "bras_sym_operand" "X"))
+          (match_operand 1 "const_int_operand" "n"))]
+   "SIBLING_CALL_P (insn) && TARGET_SMALL_EXEC"
+-  "j\t%0%K0"
++  "j\t%0"
+   [(set_attr "op_type" "RI")
+    (set_attr "type"    "branch")])
+ 
+@@ -10387,7 +10387,7 @@
+   [(call (mem:QI (match_operand 0 "bras_sym_operand" "X"))
+          (match_operand 1 "const_int_operand" "n"))]
+   "SIBLING_CALL_P (insn)"
+-  "jg\t%0%K0"
++  "jg\t%0"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "branch")])
+ 
+@@ -10440,7 +10440,7 @@
+ 	(call (mem:QI (match_operand 1 "bras_sym_operand" "X"))
+ 	      (match_operand 2 "const_int_operand" "n")))]
+   "SIBLING_CALL_P (insn) && TARGET_SMALL_EXEC"
+-  "j\t%1%K1"
++  "j\t%1"
+   [(set_attr "op_type" "RI")
+    (set_attr "type"    "branch")])
+ 
+@@ -10449,7 +10449,7 @@
+ 	(call (mem:QI (match_operand 1 "bras_sym_operand" "X"))
+ 	      (match_operand 2 "const_int_operand" "n")))]
+   "SIBLING_CALL_P (insn)"
+-  "jg\t%1%K1"
++  "jg\t%1"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "branch")])
+ 
+@@ -10476,7 +10476,7 @@
+   "!SIBLING_CALL_P (insn)
+    && TARGET_SMALL_EXEC
+    && GET_MODE (operands[2]) == Pmode"
+-  "bras\t%2,%0%K0"
++  "bras\t%2,%0"
+   [(set_attr "op_type" "RI")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")])
+@@ -10488,7 +10488,7 @@
+   "!SIBLING_CALL_P (insn)
+ 
+    && GET_MODE (operands[2]) == Pmode"
+-  "brasl\t%2,%0%K0"
++  "brasl\t%2,%0"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")
+@@ -10582,7 +10582,7 @@
+   "!SIBLING_CALL_P (insn)
+    && TARGET_SMALL_EXEC
+    && GET_MODE (operands[3]) == Pmode"
+-  "bras\t%3,%1%K1"
++  "bras\t%3,%1"
+   [(set_attr "op_type" "RI")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")])
+@@ -10595,7 +10595,7 @@
+   "!SIBLING_CALL_P (insn)
+ 
+    && GET_MODE (operands[3]) == Pmode"
+-  "brasl\t%3,%1%K1"
++  "brasl\t%3,%1"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")
+@@ -10726,7 +10726,7 @@
+   "!SIBLING_CALL_P (insn)
+    && TARGET_SMALL_EXEC
+    && GET_MODE (operands[3]) == Pmode"
+-  "bras\t%3,%1%K1%J4"
++  "bras\t%3,%1%J4"
+   [(set_attr "op_type" "RI")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")])
+@@ -10740,7 +10740,7 @@
+   "!SIBLING_CALL_P (insn)
+ 
+    && GET_MODE (operands[3]) == Pmode"
+-  "brasl\t%3,%1%K1%J4"
++  "brasl\t%3,%1%J4"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "jsr")
+    (set_attr "z196prop" "z196_cracked")
+@@ -11349,7 +11349,7 @@
+   [(set (match_operand 0 "register_operand" "=a")
+         (unspec [(label_ref (match_operand 1 "" ""))] UNSPEC_MAIN_BASE))]
+   "GET_MODE (operands[0]) == Pmode"
+-  "larl\t%0,%1%K1"
++  "larl\t%0,%1"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "larl")
+    (set_attr "z10prop" "z10_fwd_A1")
+@@ -11369,7 +11369,7 @@
+   [(set (match_operand 0 "register_operand" "=a")
+         (unspec [(label_ref (match_operand 1 "" ""))] UNSPEC_RELOAD_BASE))]
+   "GET_MODE (operands[0]) == Pmode"
+-  "larl\t%0,%1%K1"
++  "larl\t%0,%1"
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"    "larl")
+    (set_attr "z10prop" "z10_fwd_A1")])
+@@ -12226,7 +12226,7 @@
+   ""
+ {
+   s390_output_split_stack_data (operands[1], operands[2], operands[3], operands[4]);
+-  return "jg\t%0%K0";
++  return "jg\t%0";
+ }
+   [(set_attr "op_type" "RIL")
+    (set_attr "type"  "branch")])
+Index: gcc-11-11.2.0/src/gcc/testsuite/g++.dg/ext/visibility/noPLT.C
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/g++.dg/ext/visibility/noPLT.C
++++ gcc-11-11.2.0/src/gcc/testsuite/g++.dg/ext/visibility/noPLT.C
+@@ -1,5 +1,5 @@
+ /* Test that -fvisibility=hidden prevents PLT. */
+-/* { dg-do compile { target { fpic && { ! s390x-*-* } } } } */
++/* { dg-do compile { target fpic } } */
+ /* { dg-require-visibility "" } */
+ /* { dg-options "-fPIC -fvisibility=hidden" } */
+ /* { dg-final { scan-assembler-not "methodEv@PLT|indirect_symbol.*methodEv" } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/g++.target/s390/mi-thunk.C
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/g++.target/s390/mi-thunk.C
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O0 -fPIC" } */
+-
+-class A {
+-public:
+-  virtual int a (void);
+-};
+-
+-class B {
+-public:
+-  virtual int b (void);
+-};
+-
+-class C : public B, public A {
+-public:
+-  virtual int a (void);
+-};
+-
+-int C::a (void) { return b(); }
+-
+-/* { dg-final { scan-assembler {\n_ZThn8_N1C1aEv:\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {\n_ZThn4_N1C1aEv:\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {\n\tjg\t.LTHUNK0@PLT\n} { target lp64 } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z10-pic-nodatarel.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z10-pic-nodatarel.c
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z10 -mzarch -fPIC -mno-pic-data-is-text-relative" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} } } */
+-/* { dg-final { scan-assembler {lgrl\t%r2,foo@GOTENT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {lrl\t%r2,foo@GOTENT\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak@PLT\n} } } */
+-/* { dg-final { scan-assembler {lgrl\t%r2,fooweak@GOTENT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {lrl\t%r2,fooweak@GOTENT\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z10-pic.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z10-pic.c
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z10 -mzarch -fPIC" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} } } */
+-/* { dg-final { scan-assembler {lgrl\t%r2,foo@GOTENT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {lrl\t%r2,foo@GOTENT\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak@PLT\n} } } */
+-/* { dg-final { scan-assembler {lgrl\t%r2,fooweak@GOTENT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {lrl\t%r2,fooweak@GOTENT\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z10.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z10.c
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z10 -mzarch" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foo@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foo\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r2,fooweak\n} } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z9-pic-nodatarel.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z9-pic-nodatarel.c
++++ /dev/null
+@@ -1,18 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z9-ec -fPIC -mno-pic-data-is-text-relative" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r\d+,foo@GOTENT\n} } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak@PLT\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r\d+,fooweak@GOTENT\n} } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z9-pic.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z9-pic.c
++++ /dev/null
+@@ -1,18 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z9-ec -fPIC" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r\d+,foo@GOTENT\n} } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak@PLT\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r\d+,fooweak@GOTENT\n} } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call-z9.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call-z9.c
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -march=z9-ec" } */
+-
+-#include "call.h"
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foo\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foo@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foo\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {brasl\t%r\d+,foostatic\n} { target { ! lp64 } } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic@PLT\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {larl\t%r2,foostatic\n} { target { ! lp64 } } } } */
+-
+-/* { dg-final { scan-assembler {brasl\t%r\d+,fooweak\n} } } */
+-/* { dg-final { scan-assembler {larl\t%r2,fooweak\n} } } */
+-
+-/* { dg-final { scan-assembler {foos:\n\t.quad\tfoo\n\t.quad\tfoostatic\n\t.quad\tfooweak\n} { target lp64 } } } */
+-/* { dg-final { scan-assembler {foos:\n\t.long\tfoo\n\t.long\tfoostatic\n\t.long\tfooweak\n} { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/call.h
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/call.h
++++ /dev/null
+@@ -1,40 +0,0 @@
+-/* Common code for testing the function call code generation.  */
+-
+-__attribute__ ((noipa)) void
+-foo (void)
+-{
+-  return;
+-}
+-
+-void *
+-usefoo (void)
+-{
+-  foo ();
+-  return foo;
+-}
+-
+-__attribute__ ((noipa)) static void
+-foostatic (void)
+-{
+-  return;
+-}
+-
+-void *
+-usefoostatic (void)
+-{
+-  foostatic ();
+-  return foostatic;
+-}
+-
+-__attribute__ ((weak)) void fooweak (void);
+-
+-void *
+-usefooweak (void)
+-{
+-  fooweak ();
+-  return fooweak;
+-}
+-
+-__attribute__ ((__used__, section (".foos"), aligned (sizeof (void *))))
+-static void
+-*foos[] = { foo, foostatic, fooweak };
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/mfentry-m64-pic.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/mfentry-m64-pic.c
++++ /dev/null
+@@ -1,9 +0,0 @@
+-/* { dg-do compile { target { lp64 } } } */
+-/* { dg-options "-pg -mfentry -fPIC" } */
+-
+-void
+-profileme (void)
+-{
+-  /* __fentry__ must be referenced through PLT.  */
+-  /* { dg-final { scan-assembler "brasl\t0,__fentry__@PLT\n" } } */
+-}
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/nodatarel-1.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/nodatarel-1.c
++++ gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/nodatarel-1.c
+@@ -15,6 +15,12 @@ foo ()
+   return a;
+ }
+ 
++static int __attribute__((noinline,noclone))
++foostatic (void)
++{
++  return a;
++}
++
+ /* Just to make a potentially modified.  */
+ 
+ void
+@@ -23,7 +29,7 @@ bar (int b)
+   a = b;
+ }
+ 
+-/* { dg-final { scan-assembler-times "\\.LANCHOR\\d+@GOTENT" 2 } } */
++/* { dg-final { scan-assembler-times "\\.LANCHOR\\d+@GOTENT" 3 } } */
+ 
+ /* The exrl target is a label_ref which should not be affected at
+    all.  */
+@@ -57,3 +63,21 @@ fooptr ()
+ }
+ 
+ /* { dg-final { scan-assembler-times "foo@GOTENT" 1 } } */
++
++
++/* A static function can be addressed relatively.  */
++
++int
++callfoostatic ()
++{
++  return foostatic ();
++}
++
++void *
++foostaticptr ()
++{
++  return &foostatic;
++}
++
++
++/* { dg-final { scan-assembler-not "foostatic@" } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/pr80080-4.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/pr80080-4.c
++++ gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/pr80080-4.c
+@@ -13,4 +13,4 @@ void foo4(int *mem)
+     }
+ }
+ 
+-/* { dg-final { scan-assembler {(?n)\n\tlt\t.*\n\tjne\t(\.L\d+)\n(.*\n)*\tcs\t.*\n\tber\t%r14\n\1:\n\tjg\tbar(@PLT)?\n} } } */
++/* { dg-final { scan-assembler {(?n)\n\tlt\t.*\n\tjne\t(\.L\d+)\n(.*\n)*\tcs\t.*\n\tber\t%r14\n\1:\n\tjg\tbar\n} } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/risbg-ll-3.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/risbg-ll-3.c
++++ gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/risbg-ll-3.c
+@@ -23,7 +23,7 @@ i64 f1 (i64 v_a, i64 v_b)
+ extern i64 f2_foo();
+ i64 f2 (i64 v_a, i64 v_b)
+ {
+-/* { dg-final { scan-assembler "f2:\n\trisbg\t%r2,%r3,60,62,0\n\tbner\t%r14\n\tjg\tf2_foo.*\n" { target { lp64 } } } } */
++/* { dg-final { scan-assembler "f2:\n\trisbg\t%r2,%r3,60,62,0\n\tbner\t%r14\n\tjg\tf2_foo\n" { target { lp64 } } } } */
+ /* { dg-final { scan-assembler "f2:\n\trisbgn\t%r3,%r2,0,0\\\+32-1,64-0-32\n\trisbg\t%r3,%r5,60,62,0" { target { ! lp64 } } } } */
+   i64 v_anda = v_a & -15;
+   i64 v_andb = v_b & 14;
+@@ -37,8 +37,8 @@ i64 f2 (i64 v_a, i64 v_b)
+ void f2_bar ();
+ void f2_cconly (i64 v_a, i64 v_b)
+ {
+-/* { dg-final { scan-assembler "f2_cconly:\n\trisbg\t%r2,%r3,60,62,0\n\tber\t%r14\n\tjg\tf2_bar(@PLT)?\n" { target { lp64 } } } } */
+-/* { dg-final { scan-assembler "f2_cconly:\n\trisbgn\t%r3,%r2,0,0\\\+32-1,64-0-32\n\trisbg\t%r3,%r5,60,62,0\n\tber\t%r14\n\tjg\tf2_bar(@PLT)?\n" { target { ! lp64 } } } } */
++/* { dg-final { scan-assembler "f2_cconly:\n\trisbg\t%r3,%r2,63,59,0\n\tber\t%r14\n\tjg\tf2_bar\n" { target { lp64 } } } } */
++/* { dg-final { scan-assembler "f2_cconly:\n\trisbgn\t%r3,%r2,0,0\\\+32-1,64-0-32\n\trisbg\t%r3,%r5,60,62,0\n\tber\t%r14\n\tjg\tf2_bar\n" { target { ! lp64 } } } } */
+   if ((v_a & -15) | (v_b & 14))
+     f2_bar();
+ }
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/tls-pic.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/tls-pic.c
++++ /dev/null
+@@ -1,14 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3 -fPIC" } */
+-
+-#include "tls.h"
+-
+-/* foo must use the global dynamic model.
+-   __tls_get_offset must be referenced through PLT.  */
+-
+-/* { dg-final { scan-assembler-times {\tbrasl\t%r14,__tls_get_offset@PLT:tls_gdcall:foo\n} 1 } } */
+-
+-/* foostatic must use the local dynamic model.
+-   __tls_get_offset must be referenced through PLT.  */
+-
+-/* { dg-final { scan-assembler-times {\tbrasl\t%r14,__tls_get_offset@PLT:tls_ldcall} 1 } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/tls.c
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/tls.c
++++ /dev/null
+@@ -1,10 +0,0 @@
+-/* { dg-do compile } */
+-/* { dg-options "-O3" } */
+-
+-#include "tls.h"
+-
+-/* foo must use the initial-exec model, foostatic must use the local-exec
+-   model.  */
+-
+-/* { dg-final { scan-assembler-times {\tear} 4 { target lp64 } } } */
+-/* { dg-final { scan-assembler-times {\tear} 2 { target { ! lp64 } } } } */
+Index: gcc-11-11.2.0/src/gcc/testsuite/gcc.target/s390/tls.h
+===================================================================
+--- gcc-11-11.2.0.orig/src/gcc/testsuite/gcc.target/s390/tls.h
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/* Common code for testing the TLS code generation.  */
+-
+-__thread int
+-foo;
+-
+-int
+-setfoo (int x)
+-{
+-  int result = foo;
+-  foo = x;
+-  return result;
+-}
+-
+-static __thread int
+-foostatic;
+-
+-int
+-setfoostatic (int x)
+-{
+-  int result = foostatic;
+-  foostatic = x;
+-  return result;
+-}
